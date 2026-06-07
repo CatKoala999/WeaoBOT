@@ -11,43 +11,22 @@ const {
   SlashCommandBuilder,
 } = require("discord.js");
 
-const fs = require("fs");
+// ─────────────────────────────────────────
+//  설정
+// ─────────────────────────────────────────
+const TOKEN     = process.env.DISCORD_TOKEN?.trim();
+const CLIENT_ID = process.env.CLIENT_ID?.trim();
+const DATA_FILE = "./data.json";
 
-// ─────────────────────────────────────────
-//  환경 변수
-// ─────────────────────────────────────────
-const TOKEN     = process.env.DISCORD_TOKEN;
-const CLIENT_ID = process.env.CLIENT_ID;
-const GUILD_ID  = process.env.GUILD_ID;
-
-// ─────────────────────────────────────────
-//  상수
-// ─────────────────────────────────────────
 const UPDATE_INTERVAL_MS = 5 * 60 * 1000;
-const DATA_FILE          = "./data.json";
-const WEAO_API           = "https://weao.xyz/api/status/exploits";
-const WEAO_HEADERS       = { "User-Agent": "WEAO-3PService" };
 
-// 스크린샷과 동일한 그룹별 구분
+const WEAO_API     = "https://weao.xyz/api/status/exploits";
+const WEAO_HEADERS = { "User-Agent": "WEAO-3PService" };
+
 const TRACKED = {
-  windowsPaid: ["Potassium", "Wave", "Seliware", "Volt", "SirHurt", "Synapse Z", "Cosmic"],
-  windowsFree: ["Velocity", "Xeno", "Solara", "Madium"],
-  macPaid:     ["MacSploit"],
-  macFree:     ["Opiumware"]
+  windows: ["Potassium","Wave","Seliware","Volt","SirHurt","Synapse Z","Cosmic","Velocity","Xeno","Solara","Madium"],
+  mac:     ["MacSploit","Opiumware"],
 };
-
-// ─────────────────────────────────────────
-//  데이터 저장/불러오기
-// ─────────────────────────────────────────
-function loadData() {
-  try { return JSON.parse(fs.readFileSync(DATA_FILE, "utf8")); }
-  catch { return { channelId: null, messageId: null }; }
-}
-function saveData(d) {
-  fs.writeFileSync(DATA_FILE, JSON.stringify(d, null, 2));
-}
-
-let data = loadData();
 
 // ─────────────────────────────────────────
 //  슬래시 커맨드 등록
@@ -55,178 +34,244 @@ let data = loadData();
 const commands = [
   new SlashCommandBuilder()
     .setName("set-channel")
-    .setDescription("익스플로잇 상태를 올릴 일반 텍스트 채널을 설정합니다 (관리자 전용)")
+    .setDescription("익스플로잇 상태를 올릴 포럼 채널을 설정합니다 (관리자 전용)")
+    .addChannelOption(opt =>
+      opt.setName("채널")
+        .setDescription("포럼 채널 선택")
+        .setRequired(true))
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
-    .addChannelOption(o =>
-      o.setName("channel")
-       .setDescription("상태를 올릴 일반 텍스트 채널")
-       .setRequired(true)
-    )
     .toJSON(),
 
   new SlashCommandBuilder()
-    .setName("update-now")
+    .setName("set-text-channel")
+    .setDescription("익스플로잇 상태를 올릴 일반 텍스트 채널을 설정합니다 (관리자 전용)")
+    .addChannelOption(opt =>
+      opt.setName("채널")
+        .setDescription("텍스트 채널 선택")
+        .setRequired(true))
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+    .toJSON(),
+
+  new SlashCommandBuilder()
+    .setName("update")
     .setDescription("익스플로잇 상태를 지금 즉시 갱신합니다 (관리자 전용)")
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
     .toJSON(),
 ];
 
+async function registerCommands() {
+  const rest = new REST({ version: "10" }).setToken(TOKEN);
+  await rest.put(Routes.applicationCommands(CLIENT_ID), { body: commands });
+  console.log("✅ 슬래시 커맨드 등록 완료");
+}
+
 // ─────────────────────────────────────────
-//  WEAO API + Embed
+//  데이터 저장/불러오기
+// ─────────────────────────────────────────
+const fs = require("fs");
+
+function loadData() {
+  try {
+    return JSON.parse(fs.readFileSync(DATA_FILE, "utf8"));
+  } catch {
+    return {
+      forum:   { channelId: null, threadId: null, messageId: null },
+      text:    { channelId: null, messageId: null },
+    };
+  }
+}
+
+function saveData(data) {
+  fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
+}
+
+let data = loadData();
+
+// ─────────────────────────────────────────
+//  WEAO API 호출
 // ─────────────────────────────────────────
 async function fetchExploits() {
   const res = await fetch(WEAO_API, { headers: WEAO_HEADERS });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return res.json();
+  return await res.json();
 }
 
+// ─────────────────────────────────────────
+//  Embed 빌드
+// ─────────────────────────────────────────
 function statusEmoji(e) {
   if (!e)              return "⚫";
   if (!e.updateStatus) return "🔴";
+  if (e.detected)      return "🟡";
   return "🟢";
 }
 
-function exploitLine(e, name, isPaid) {
-  const emoji = statusEmoji(e);
-  const url = e?.websitelink || "https://weao.xyz";
-  const linkText = `[바로가기](${url})`;
-  const typeText = isPaid ? " / {유료}" : "";
-  return `• **${name}**${typeText}: ${linkText} ${emoji}`;
+function statusText(e) {
+  if (!e)              return "정보 없음";
+  if (!e.updateStatus) return "다운";
+  if (e.detected)      return "감지됨 (주의)";
+  return "정상";
+}
+
+function exploitLine(e, name) {
+  const emoji  = statusEmoji(e);
+  const status = statusText(e);
+  const ver    = e?.version ? ` \`${e.version}\`` : "";
+  const cost   = e ? (e.free ? " · 무료" : e.cost ? ` · ${e.cost}` : " · 유료") : "";
+  const link   = e?.websitelink ? ` · [사이트](${e.websitelink})` : "";
+  return `${emoji} **${name}**${ver} — ${status}${cost}${link}`;
 }
 
 function buildEmbed(allData) {
   const map = {};
   for (const item of allData) map[item.title.toLowerCase()] = item;
 
-  // Windows
-  const winPaidLines = TRACKED.windowsPaid.map(n => exploitLine(map[n.toLowerCase()], n, true));
-  const winFreeLines = TRACKED.windowsFree.map(n => exploitLine(map[n.toLowerCase()], n, false));
-  
-  // Mac
-  const macPaidLines = TRACKED.macPaid.map(n => exploitLine(map[n.toLowerCase()], n, true));
-  const macFreeLines = TRACKED.macFree.map(n => exploitLine(map[n.toLowerCase()], n, false));
+  const timeStr = new Date().toLocaleString("ko-KR", { timeZone: "Asia/Seoul" });
 
-  // 스크린샷과 동일한 포맷의 텍스트 구성
-  const description = [
-    "**Windows [윈도우]**",
-    "",
-    ...winPaidLines,
-    "",
-    ...winFreeLines,
-    "",
-    "---------------------------------------------",
-    "",
-    "**Mac [맥]**",
-    "",
-    ...macPaidLines,
-    "",
-    ...macFreeLines,
-    "",
-    "온라인 여부 확인하러 가기: [weao.xyz](https://weao.xyz)"
-  ].join("\n");
+  const embed = new EmbedBuilder()
+    .setTitle("📋 Roblox Exploit 상태판")
+    .setColor(0x5865f2)
+    .setFooter({ text: `WEAO API 기준 · 갱신: ${timeStr}` })
+    .setTimestamp();
 
-  return new EmbedBuilder()
-    .setDescription(description)
-    .setColor(0x2b2d31); // 디스코드 기본 어두운 임베드 색상
+  const winLines = TRACKED.windows.map(n => exploitLine(map[n.toLowerCase()], n));
+  const macLines = TRACKED.mac.map(n => exploitLine(map[n.toLowerCase()], n));
+
+  embed.addFields(
+    { name: "🖥️ Windows", value: winLines.join("\n") },
+    { name: "🍎 Mac",     value: macLines.join("\n") },
+    { name: "범례",        value: "🟢 정상　🟡 감지됨　🔴 다운　⚫ 정보없음", inline: false },
+  );
+
+  return embed;
 }
 
 // ─────────────────────────────────────────
-//  임베드 전송 / 수정
+//  포럼 포스트 생성/갱신
 // ─────────────────────────────────────────
-async function postOrUpdate() {
-  if (!data.channelId) return; // 채널 미설정이면 건너뜀
+async function updateForum(embed) {
+  const { channelId, threadId, messageId } = data.forum;
+  if (!channelId) return;
 
-  let channel;
-  try {
-    channel = await client.channels.fetch(data.channelId);
-  } catch (err) {
-    console.error("채널 불러오기 실패:", err.message);
-    return;
-  }
+  const forum = await client.channels.fetch(channelId).catch(() => null);
+  if (!forum || forum.type !== ChannelType.GuildForum) return;
 
-  if (!channel || !channel.isTextBased()) {
-    console.error("설정된 채널이 메시지를 보낼 수 있는 텍스트 채널이 아닙니다.");
-    return;
-  }
-
-  const allData = await fetchExploits();
-  const embed   = buildEmbed(allData);
-
-  // 기존 메시지가 있으면 수정
-  if (data.messageId) {
+  if (threadId && messageId) {
     try {
-      const msg = await channel.messages.fetch(data.messageId);
+      const thread = await client.channels.fetch(threadId);
+      const msg    = await thread.messages.fetch(messageId);
       await msg.edit({ embeds: [embed] });
-      console.log(`[${new Date().toLocaleTimeString("ko-KR")}] ✅ 임베드 수정 완료`);
       return;
     } catch {
-      // 메시지를 찾을 수 없는 경우 새로 생성하도록 id 초기화
-      data.messageId = null;
+      console.warn("포럼 기존 포스트 수정 실패 → 새 포스트 생성");
     }
   }
 
-  // 메시지가 없거나 수정 실패 시 새로 전송
-  const newMsg = await channel.send({ embeds: [embed] });
-  data.messageId = newMsg.id;
+  const post = await forum.threads.create({
+    name: "📊 Exploit 상태 (자동 갱신)",
+    message: { embeds: [embed] },
+    reason: "WEAO 익스플로잇 상태 자동 포스트",
+  });
+
+  data.forum.threadId  = post.id;
+  data.forum.messageId = post.messages.cache.first()?.id ?? null;
   saveData(data);
-  console.log(`✅ 새 임베드 전송 완료 (메시지 ID: ${newMsg.id})`);
+  console.log(`포럼 새 포스트 생성 | thread: ${data.forum.threadId}`);
 }
 
 // ─────────────────────────────────────────
-//  Discord 클라이언트
+//  텍스트 채널 메시지 생성/갱신
 // ─────────────────────────────────────────
-const client = new Client({ intents: [GatewayIntentBits.Guilds] });
+async function updateTextChannel(embed) {
+  const { channelId, messageId } = data.text;
+  if (!channelId) return;
 
-client.on("error", err => console.error("[Discord 에러]", err.message));
-process.on("unhandledRejection", err => console.error("[오류]", err?.message ?? err));
+  const channel = await client.channels.fetch(channelId).catch(() => null);
+  if (!channel) return;
+
+  if (messageId) {
+    try {
+      const msg = await channel.messages.fetch(messageId);
+      await msg.edit({ embeds: [embed] });
+      return;
+    } catch {
+      console.warn("텍스트 채널 기존 메시지 수정 실패 → 새 메시지 전송");
+    }
+  }
+
+  const sent = await channel.send({ embeds: [embed] });
+  data.text.messageId = sent.id;
+  saveData(data);
+  console.log(`텍스트 채널 새 메시지 전송 | msg: ${sent.id}`);
+}
+
+// ─────────────────────────────────────────
+//  통합 갱신 함수
+// ─────────────────────────────────────────
+async function postOrUpdate() {
+  let allData;
+  try {
+    allData = await fetchExploits();
+  } catch (err) {
+    return console.error("WEAO API 오류:", err.message);
+  }
+
+  const embed = buildEmbed(allData);
+  const timeTag = new Date().toLocaleTimeString("ko-KR");
+
+  await updateForum(embed);
+  await updateTextChannel(embed);
+  console.log(`[${timeTag}] 전체 갱신 완료`);
+}
 
 // ─────────────────────────────────────────
 //  슬래시 커맨드 핸들러
 // ─────────────────────────────────────────
-client.on("interactionCreate", async interaction => {
+const client = new Client({ intents: [GatewayIntentBits.Guilds] });
+
+client.on("interactionCreate", async (interaction) => {
   if (!interaction.isChatInputCommand()) return;
 
-  // /set-channel
-  if (interaction.commandName === "set-channel") {
-    if (!interaction.memberPermissions.has(PermissionFlagsBits.Administrator))
-      return interaction.reply({ content: "❌ 관리자만 사용할 수 있습니다.", ephemeral: true });
+  if (!interaction.memberPermissions.has(PermissionFlagsBits.Administrator)) {
+    return interaction.reply({ content: "❌ 관리자만 사용할 수 있습니다.", ephemeral: true });
+  }
 
-    const ch = interaction.options.getChannel("channel");
-    if (!ch.isTextBased() || ch.type === ChannelType.GuildForum)
-      return interaction.reply({ content: "❌ **일반 텍스트 채널**만 선택할 수 있습니다.", ephemeral: true });
+  const { commandName } = interaction;
 
-    await interaction.deferReply({ ephemeral: true });
-
-    // 채널 바뀌면 메시지 ID 초기화
-    if (data.channelId !== ch.id) {
-      data = { channelId: ch.id, messageId: null };
-      saveData(data);
+  // 포럼 채널 설정
+  if (commandName === "set-channel") {
+    const channel = interaction.options.getChannel("채널");
+    if (channel.type !== ChannelType.GuildForum) {
+      return interaction.reply({ content: "❌ 포럼 채널만 선택할 수 있습니다.", ephemeral: true });
     }
-
-    try {
-      await postOrUpdate();
-      await interaction.editReply(`✅ <#${ch.id}> 채널로 설정 완료! 상태판이 생성되었습니다.`);
-    } catch (err) {
-      await interaction.editReply(`❌ 전송 실패: ${err.message}`);
-    }
+    data.forum.channelId = channel.id;
+    data.forum.threadId  = null;
+    data.forum.messageId = null;
+    saveData(data);
+    await interaction.reply({ content: `✅ 포럼 채널이 <#${channel.id}>로 설정됐습니다.`, ephemeral: true });
+    await postOrUpdate();
     return;
   }
 
-  // /update-now
-  if (interaction.commandName === "update-now") {
-    if (!interaction.memberPermissions.has(PermissionFlagsBits.Administrator))
-      return interaction.reply({ content: "❌ 관리자만 사용할 수 있습니다.", ephemeral: true });
-
-    if (!data.channelId)
-      return interaction.reply({ content: "❌ 먼저 `/set-channel`로 채널을 설정해 주세요.", ephemeral: true });
-
-    await interaction.deferReply({ ephemeral: true });
-    try {
-      await postOrUpdate();
-      await interaction.editReply("✅ 상태가 즉시 갱신됐습니다.");
-    } catch (err) {
-      await interaction.editReply(`❌ 갱신 실패: ${err.message}`);
+  // 텍스트 채널 설정
+  if (commandName === "set-text-channel") {
+    const channel = interaction.options.getChannel("채널");
+    if (channel.type !== ChannelType.GuildText) {
+      return interaction.reply({ content: "❌ 일반 텍스트 채널만 선택할 수 있습니다.", ephemeral: true });
     }
+    data.text.channelId = channel.id;
+    data.text.messageId = null;
+    saveData(data);
+    await interaction.reply({ content: `✅ 텍스트 채널이 <#${channel.id}>로 설정됐습니다.`, ephemeral: true });
+    await postOrUpdate();
+    return;
+  }
+
+  // 수동 즉시 갱신
+  if (commandName === "update") {
+    await interaction.deferReply({ ephemeral: true });
+    await postOrUpdate();
+    await interaction.editReply("✅ 즉시 갱신 완료!");
     return;
   }
 });
@@ -234,47 +279,11 @@ client.on("interactionCreate", async interaction => {
 // ─────────────────────────────────────────
 //  봇 시작
 // ─────────────────────────────────────────
-client.once("clientReady", async () => {
-  const botClientId = client.user.id;
-  console.log(`✅ 봇 온라인: ${client.user.tag} (ID: ${botClientId})`);
-
-  try {
-    const rest = new REST({ version: "10" }).setToken(TOKEN);
-    const joinedGuilds = await client.guilds.fetch();
-    const isBotInTargetGuild = joinedGuilds.has(GUILD_ID);
-
-    let route;
-    if (GUILD_ID) {
-      if (isBotInTargetGuild) {
-        console.log(`[시작] 지정된 서버에 슬래시 커맨드 즉시 등록 중... (서버 ID: ${GUILD_ID})`);
-        route = Routes.applicationGuildCommands(botClientId, GUILD_ID);
-      } else {
-        console.warn(`⚠️ 경고: .env에 입력된 서버 ID(${GUILD_ID})에 봇이 들어있지 않습니다. 글로벌 등록으로 진행합니다.`);
-        route = Routes.applicationCommands(botClientId);
-      }
-    } else if (joinedGuilds.size > 0) {
-      const firstGuildId = joinedGuilds.first().id;
-      console.log(`[시작] 첫 번째 서버에 슬래시 커맨드 즉시 등록 중... (서버 ID: ${firstGuildId})`);
-      route = Routes.applicationGuildCommands(botClientId, firstGuildId);
-    } else {
-      route = Routes.applicationCommands(botClientId);
-    }
-    
-    await rest.put(route, { body: commands });
-    console.log(`슬래시 커맨드 등록 완료! /set-channel 로 채널을 설정하세요.`);
-  } catch (err) {
-    console.error("❌ 슬래시 커맨드 등록 중 오류 발생:", err.message);
-  }
-
-  // 채널 설정돼있으면 바로 갱신 시작
-  if (data.channelId) {
-    postOrUpdate().catch(err => console.error("[오류]", err.stack));
-  }
-
-  // 5분마다 자동 갱신
-  setInterval(() => {
-    postOrUpdate().catch(err => console.error("[오류]", err.stack));
-  }, UPDATE_INTERVAL_MS);
+client.once("ready", async () => {
+  console.log(`✅ 로그인: ${client.user.tag}`);
+  await registerCommands();
+  await postOrUpdate();
+  setInterval(postOrUpdate, UPDATE_INTERVAL_MS);
 });
 
 client.login(TOKEN);
