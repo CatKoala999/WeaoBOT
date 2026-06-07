@@ -11,9 +11,6 @@ const {
   SlashCommandBuilder,
 } = require("discord.js");
 
-// ─────────────────────────────────────────
-//  설정
-// ─────────────────────────────────────────
 const TOKEN     = process.env.DISCORD_TOKEN?.trim();
 const CLIENT_ID = process.env.CLIENT_ID?.trim();
 const DATA_FILE = "./data.json";
@@ -34,27 +31,17 @@ const TRACKED = {
 const commands = [
   new SlashCommandBuilder()
     .setName("set-channel")
-    .setDescription("익스플로잇 상태를 올릴 포럼 채널을 설정합니다 (관리자 전용)")
+    .setDescription("익스플로잇 상태를 올릴 채널을 설정합니다 (포럼/텍스트 모두 가능, 관리자 전용)")
     .addChannelOption(opt =>
       opt.setName("채널")
-        .setDescription("포럼 채널 선택")
-        .setRequired(true))
-    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
-    .toJSON(),
-
-  new SlashCommandBuilder()
-    .setName("set-text-channel")
-    .setDescription("익스플로잇 상태를 올릴 일반 텍스트 채널을 설정합니다 (관리자 전용)")
-    .addChannelOption(opt =>
-      opt.setName("채널")
-        .setDescription("텍스트 채널 선택")
+        .setDescription("채널 선택 (포럼 또는 텍스트)")
         .setRequired(true))
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
     .toJSON(),
 
   new SlashCommandBuilder()
     .setName("update")
-    .setDescription("익스플로잇 상태를 지금 즉시 갱신합니다 (관리자 전용)")
+    .setDescription("익스플로잇 상태를 즉시 갱신합니다 (관리자 전용)")
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
     .toJSON(),
 ];
@@ -75,14 +62,14 @@ function loadData() {
     return JSON.parse(fs.readFileSync(DATA_FILE, "utf8"));
   } catch {
     return {
-      forum:   { channelId: null, threadId: null, messageId: null },
-      text:    { channelId: null, messageId: null },
+      forum: { channelId: null, threadId: null, messageId: null },
+      text:  { channelId: null, messageId: null },
     };
   }
 }
 
-function saveData(data) {
-  fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
+function saveData(d) {
+  fs.writeFileSync(DATA_FILE, JSON.stringify(d, null, 2));
 }
 
 let data = loadData();
@@ -147,7 +134,7 @@ function buildEmbed(allData) {
 }
 
 // ─────────────────────────────────────────
-//  포럼 포스트 생성/갱신
+//  포럼 갱신
 // ─────────────────────────────────────────
 async function updateForum(embed) {
   const { channelId, threadId, messageId } = data.forum;
@@ -180,7 +167,7 @@ async function updateForum(embed) {
 }
 
 // ─────────────────────────────────────────
-//  텍스트 채널 메시지 생성/갱신
+//  텍스트 채널 갱신
 // ─────────────────────────────────────────
 async function updateTextChannel(embed) {
   const { channelId, messageId } = data.text;
@@ -206,7 +193,7 @@ async function updateTextChannel(embed) {
 }
 
 // ─────────────────────────────────────────
-//  통합 갱신 함수
+//  통합 갱신
 // ─────────────────────────────────────────
 async function postOrUpdate() {
   let allData;
@@ -217,11 +204,9 @@ async function postOrUpdate() {
   }
 
   const embed = buildEmbed(allData);
-  const timeTag = new Date().toLocaleTimeString("ko-KR");
-
   await updateForum(embed);
   await updateTextChannel(embed);
-  console.log(`[${timeTag}] 전체 갱신 완료`);
+  console.log(`[${new Date().toLocaleTimeString("ko-KR")}] 갱신 완료`);
 }
 
 // ─────────────────────────────────────────
@@ -238,36 +223,27 @@ client.on("interactionCreate", async (interaction) => {
 
   const { commandName } = interaction;
 
-  // 포럼 채널 설정
   if (commandName === "set-channel") {
     const channel = interaction.options.getChannel("채널");
-    if (channel.type !== ChannelType.GuildForum) {
-      return interaction.reply({ content: "❌ 포럼 채널만 선택할 수 있습니다.", ephemeral: true });
+
+    if (channel.type === ChannelType.GuildForum) {
+      data.forum = { channelId: channel.id, threadId: null, messageId: null };
+      saveData(data);
+      await interaction.reply({ content: `✅ 포럼 채널이 <#${channel.id}>로 설정됐습니다.`, ephemeral: true });
+
+    } else if (channel.type === ChannelType.GuildText) {
+      data.text = { channelId: channel.id, messageId: null };
+      saveData(data);
+      await interaction.reply({ content: `✅ 텍스트 채널이 <#${channel.id}>로 설정됐습니다.`, ephemeral: true });
+
+    } else {
+      return interaction.reply({ content: "❌ 포럼 또는 일반 텍스트 채널만 선택할 수 있습니다.", ephemeral: true });
     }
-    data.forum.channelId = channel.id;
-    data.forum.threadId  = null;
-    data.forum.messageId = null;
-    saveData(data);
-    await interaction.reply({ content: `✅ 포럼 채널이 <#${channel.id}>로 설정됐습니다.`, ephemeral: true });
+
     await postOrUpdate();
     return;
   }
 
-  // 텍스트 채널 설정
-  if (commandName === "set-text-channel") {
-    const channel = interaction.options.getChannel("채널");
-    if (channel.type !== ChannelType.GuildText) {
-      return interaction.reply({ content: "❌ 일반 텍스트 채널만 선택할 수 있습니다.", ephemeral: true });
-    }
-    data.text.channelId = channel.id;
-    data.text.messageId = null;
-    saveData(data);
-    await interaction.reply({ content: `✅ 텍스트 채널이 <#${channel.id}>로 설정됐습니다.`, ephemeral: true });
-    await postOrUpdate();
-    return;
-  }
-
-  // 수동 즉시 갱신
   if (commandName === "update") {
     await interaction.deferReply({ ephemeral: true });
     await postOrUpdate();
