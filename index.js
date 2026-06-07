@@ -107,19 +107,16 @@ function buildMessage(allData) {
     day: "numeric",
   });
 
-  const winLines = TRACKED.windows.map(n => {
-    const e   = map[n.toLowerCase()];
+  const formatLine = (n) => {
+    const e    = map[n.toLowerCase()];
     const dot  = (!e || !e.updateStatus) ? "🔴" : "🟢";
     const link = e?.websitelink ? `[바로가기](<${e.websitelink}>)` : "";
-    return `• ${n}: ${link} ${dot}`;
-  });
+    const paid = e ? (e.free ? "무료" : `유료 / ${e.cost ?? "가격 미정"}`) : "정보 없음";
+    return `• ${n} / ${paid}: ${link} ${dot}`;
+  };
 
-  const macLines = TRACKED.mac.map(n => {
-    const e   = map[n.toLowerCase()];
-    const dot  = (!e || !e.updateStatus) ? "🔴" : "🟢";
-    const link = e?.websitelink ? `[바로가기](<${e.websitelink}>)` : "";
-    return `• ${n}: ${link} ${dot}`;
-  });
+  const winLines = TRACKED.windows.map(formatLine);
+  const macLines = TRACKED.mac.map(formatLine);
 
   return [
     "**Windows [윈도우]**",
@@ -131,7 +128,6 @@ function buildMessage(allData) {
     `오늘 ${timeStr}`,
   ].join("\n");
 }
-
 // ─────────────────────────────────────────
 //  텍스트 채널 갱신
 // ─────────────────────────────────────────
