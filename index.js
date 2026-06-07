@@ -11,6 +11,8 @@ const {
   SlashCommandBuilder,
 } = require("discord.js");
 
+const fs = require("fs");
+
 const TOKEN     = process.env.DISCORD_TOKEN?.trim();
 const CLIENT_ID = process.env.CLIENT_ID?.trim();
 const DATA_FILE = "./data.json";
@@ -55,11 +57,13 @@ async function registerCommands() {
 // ─────────────────────────────────────────
 //  데이터 저장/불러오기
 // ─────────────────────────────────────────
-const fs = require("fs");
-
 function loadData() {
   try {
-    return JSON.parse(fs.readFileSync(DATA_FILE, "utf8"));
+    const raw = JSON.parse(fs.readFileSync(DATA_FILE, "utf8"));
+    return {
+      forum: raw.forum ?? { channelId: null, threadId: null, messageId: null },
+      text:  raw.text  ?? { channelId: null, messageId: null },
+    };
   } catch {
     return {
       forum: { channelId: null, threadId: null, messageId: null },
@@ -137,16 +141,15 @@ function buildEmbed(allData) {
 //  포럼 갱신
 // ─────────────────────────────────────────
 async function updateForum(embed) {
-  const { channelId, threadId, messageId } = data.forum;
-  if (!channelId) return;
+  if (!data.forum?.channelId) return;
 
-  const forum = await client.channels.fetch(channelId).catch(() => null);
+  const forum = await client.channels.fetch(data.forum.channelId).catch(() => null);
   if (!forum || forum.type !== ChannelType.GuildForum) return;
 
-  if (threadId && messageId) {
+  if (data.forum.threadId && data.forum.messageId) {
     try {
-      const thread = await client.channels.fetch(threadId);
-      const msg    = await thread.messages.fetch(messageId);
+      const thread = await client.channels.fetch(data.forum.threadId);
+      const msg    = await thread.messages.fetch(data.forum.messageId);
       await msg.edit({ embeds: [embed] });
       return;
     } catch {
@@ -170,15 +173,14 @@ async function updateForum(embed) {
 //  텍스트 채널 갱신
 // ─────────────────────────────────────────
 async function updateTextChannel(embed) {
-  const { channelId, messageId } = data.text;
-  if (!channelId) return;
+  if (!data.text?.channelId) return;
 
-  const channel = await client.channels.fetch(channelId).catch(() => null);
+  const channel = await client.channels.fetch(data.text.channelId).catch(() => null);
   if (!channel) return;
 
-  if (messageId) {
+  if (data.text.messageId) {
     try {
-      const msg = await channel.messages.fetch(messageId);
+      const msg = await channel.messages.fetch(data.text.messageId);
       await msg.edit({ embeds: [embed] });
       return;
     } catch {
@@ -255,11 +257,15 @@ client.on("interactionCreate", async (interaction) => {
 // ─────────────────────────────────────────
 //  봇 시작
 // ─────────────────────────────────────────
-client.once("ready", async () => {
+client.once("clientReady", async () => {
   console.log(`✅ 로그인: ${client.user.tag}`);
   await registerCommands();
   await postOrUpdate();
   setInterval(postOrUpdate, UPDATE_INTERVAL_MS);
+});
+
+process.on("unhandledRejection", (err) => {
+  console.error("unhandledRejection:", err.message);
 });
 
 client.login(TOKEN);
