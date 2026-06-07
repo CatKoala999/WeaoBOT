@@ -96,20 +96,10 @@ function statusEmoji(e) {
   return "🟢";
 }
 
-function statusText(e) {
-  if (!e)              return "정보 없음";
-  if (!e.updateStatus) return "다운";
-  if (e.detected)      return "감지됨 (주의)";
-  return "정상";
-}
-
 function exploitLine(e, name) {
-  const emoji  = statusEmoji(e);
-  const status = statusText(e);
-  const ver    = e?.version ? ` \`${e.version}\`` : "";
-  const cost   = e ? (e.free ? " · 무료" : e.cost ? ` · ${e.cost}` : " · 유료") : "";
-  const link   = e?.websitelink ? ` · [사이트](${e.websitelink})` : "";
-  return `${emoji} **${name}**${ver} — ${status}${cost}${link}`;
+  const emoji = statusEmoji(e);
+  const link  = e?.websitelink ? `[${name}](${e.websitelink})` : `**${name}**`;
+  return `${emoji} ${link}`;
 }
 
 function buildEmbed(allData) {
