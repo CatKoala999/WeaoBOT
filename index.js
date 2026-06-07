@@ -33,10 +33,11 @@ const TRACKED = {
 const commands = [
   new SlashCommandBuilder()
     .setName("set-channel")
-    .setDescription("익스플로잇 상태를 올릴 채널을 설정합니다 (포럼/텍스트 모두 가능, 관리자 전용)")
+    .setDescription("익스플로잇 상태를 올릴 텍스트 채널을 설정합니다 (관리자 전용)")
     .addChannelOption(opt =>
       opt.setName("채널")
-        .setDescription("채널 선택 (포럼 또는 텍스트)")
+        .setDescription("텍스트 채널 선택")
+        .addChannelTypes(ChannelType.GuildText)
         .setRequired(true))
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
     .toJSON(),
@@ -61,13 +62,11 @@ function loadData() {
   try {
     const raw = JSON.parse(fs.readFileSync(DATA_FILE, "utf8"));
     return {
-      forum: raw.forum ?? { channelId: null, threadId: null, messageId: null },
-      text:  raw.text  ?? { channelId: null, messageId: null },
+      text: raw.text ?? { channelId: null, messageId: null },
     };
   } catch {
     return {
-      forum: { channelId: null, threadId: null, messageId: null },
-      text:  { channelId: null, messageId: null },
+      text: { channelId: null, messageId: null },
     };
   }
 }
@@ -138,38 +137,6 @@ function buildEmbed(allData) {
 }
 
 // ─────────────────────────────────────────
-//  포럼 갱신
-// ─────────────────────────────────────────
-async function updateForum(embed) {
-  if (!data.forum?.channelId) return;
-
-  const forum = await client.channels.fetch(data.forum.channelId).catch(() => null);
-  if (!forum || forum.type !== ChannelType.GuildForum) return;
-
-  if (data.forum.threadId && data.forum.messageId) {
-    try {
-      const thread = await client.channels.fetch(data.forum.threadId);
-      const msg    = await thread.messages.fetch(data.forum.messageId);
-      await msg.edit({ embeds: [embed] });
-      return;
-    } catch {
-      console.warn("포럼 기존 포스트 수정 실패 → 새 포스트 생성");
-    }
-  }
-
-  const post = await forum.threads.create({
-    name: "📊 Exploit 상태 (자동 갱신)",
-    message: { embeds: [embed] },
-    reason: "WEAO 익스플로잇 상태 자동 포스트",
-  });
-
-  data.forum.threadId  = post.id;
-  data.forum.messageId = post.messages.cache.first()?.id ?? null;
-  saveData(data);
-  console.log(`포럼 새 포스트 생성 | thread: ${data.forum.threadId}`);
-}
-
-// ─────────────────────────────────────────
 //  텍스트 채널 갱신
 // ─────────────────────────────────────────
 async function updateTextChannel(embed) {
@@ -184,14 +151,14 @@ async function updateTextChannel(embed) {
       await msg.edit({ embeds: [embed] });
       return;
     } catch {
-      console.warn("텍스트 채널 기존 메시지 수정 실패 → 새 메시지 전송");
+      console.warn("기존 메시지 수정 실패 → 새 메시지 전송");
     }
   }
 
   const sent = await channel.send({ embeds: [embed] });
   data.text.messageId = sent.id;
   saveData(data);
-  console.log(`텍스트 채널 새 메시지 전송 | msg: ${sent.id}`);
+  console.log(`새 메시지 전송 | msg: ${sent.id}`);
 }
 
 // ─────────────────────────────────────────
@@ -206,7 +173,6 @@ async function postOrUpdate() {
   }
 
   const embed = buildEmbed(allData);
-  await updateForum(embed);
   await updateTextChannel(embed);
   console.log(`[${new Date().toLocaleTimeString("ko-KR")}] 갱신 완료`);
 }
@@ -227,21 +193,9 @@ client.on("interactionCreate", async (interaction) => {
 
   if (commandName === "set-channel") {
     const channel = interaction.options.getChannel("채널");
-
-    if (channel.type === ChannelType.GuildForum) {
-      data.forum = { channelId: channel.id, threadId: null, messageId: null };
-      saveData(data);
-      await interaction.reply({ content: `✅ 포럼 채널이 <#${channel.id}>로 설정됐습니다.`, ephemeral: true });
-
-    } else if (channel.type === ChannelType.GuildText) {
-      data.text = { channelId: channel.id, messageId: null };
-      saveData(data);
-      await interaction.reply({ content: `✅ 텍스트 채널이 <#${channel.id}>로 설정됐습니다.`, ephemeral: true });
-
-    } else {
-      return interaction.reply({ content: "❌ 포럼 또는 일반 텍스트 채널만 선택할 수 있습니다.", ephemeral: true });
-    }
-
+    data.text = { channelId: channel.id, messageId: null };
+    saveData(data);
+    await interaction.reply({ content: `✅ 채널이 <#${channel.id}>로 설정됐습니다.`, ephemeral: true });
     await postOrUpdate();
     return;
   }
