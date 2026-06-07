@@ -8,7 +8,6 @@ const {
   REST,
   Routes,
   SlashCommandBuilder,
-  MessageFlags,
 } = require("discord.js");
 
 const fs = require("fs");
@@ -87,9 +86,9 @@ async function fetchExploits() {
 }
 
 // ─────────────────────────────────────────
-//  메시지 빌드
+//  임베드 빌드
 // ─────────────────────────────────────────
-function buildMessage(allData) {
+function buildEmbed(allData) {
   const map = {};
   for (const item of allData) map[item.title.toLowerCase()] = item;
 
@@ -100,6 +99,12 @@ function buildMessage(allData) {
     minute: "2-digit",
     hour12: true,
   });
+  const dateStr = now.toLocaleString("ko-KR", {
+    timeZone: "Asia/Seoul",
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  });
 
   const formatLine = (n) => {
     const e    = map[n.toLowerCase()];
@@ -107,31 +112,47 @@ function buildMessage(allData) {
     const link = e?.websitelink ? `[바로가기](<${e.websitelink}>)` : "바로가기";
 
     if (e && !e.free) {
-      // 유료
       return `• ${n} / [유료]: ${link} ${dot}`;
     } else {
-      // 무료
       return `• ${n}: ${link} ${dot}`;
     }
   };
 
-  const winLines = TRACKED.windows.map(formatLine);
-  const macLines = TRACKED.mac.map(formatLine);
+  const winLines = TRACKED.windows.map(formatLine).join("\n");
+  const macLines = TRACKED.mac.map(formatLine).join("\n");
 
-  return [
-    `\`Windows [윈도우]\``,
-    winLines.join("\n"),
-    "\n─────────────────────────────────────",
-    `\`Mac [맥]\``,
-    macLines.join("\n"),
-    "\n온라인 여부 확인하러 가기: [weao.xyz](<https://weao.xyz/>)",
-    `오늘 ${timeStr}`,
-  ].join("\n");
+  return {
+    embeds: [{
+      color: 0x5865F2,
+      fields: [
+        {
+          name: "🖥️ Windows [윈도우]",
+          value: winLines,
+          inline: false,
+        },
+        {
+          name: "🍎 Mac [맥]",
+          value: macLines,
+          inline: false,
+        },
+        {
+          name: "🔗 온라인 여부 확인",
+          value: "[weao.xyz](<https://weao.xyz/>)",
+          inline: false,
+        },
+      ],
+      footer: {
+        text: `오늘 ${timeStr} • ${dateStr}`,
+      },
+      timestamp: new Date().toISOString(),
+    }],
+  };
 }
+
 // ─────────────────────────────────────────
 //  텍스트 채널 갱신
 // ─────────────────────────────────────────
-async function updateTextChannel(content) {
+async function updateTextChannel(payload) {
   if (!data.text?.channelId) return;
 
   const channel = await client.channels.fetch(data.text.channelId).catch(() => null);
@@ -140,14 +161,14 @@ async function updateTextChannel(content) {
   if (data.text.messageId) {
     try {
       const msg = await channel.messages.fetch(data.text.messageId);
-      await msg.edit({ content, flags: MessageFlags.SuppressEmbeds });
+      await msg.edit(payload);
       return;
     } catch {
       console.warn("기존 메시지 수정 실패 → 새 메시지 전송");
     }
   }
 
-  const sent = await channel.send({ content, flags: MessageFlags.SuppressEmbeds });
+  const sent = await channel.send(payload);
   data.text.messageId = sent.id;
   saveData(data);
   console.log(`새 메시지 전송 | msg: ${sent.id}`);
@@ -164,8 +185,8 @@ async function postOrUpdate() {
     return console.error("WEAO API 오류:", err.message);
   }
 
-  const content = buildMessage(allData);
-  await updateTextChannel(content);
+  const payload = buildEmbed(allData);
+  await updateTextChannel(payload);
   console.log(`[${new Date().toLocaleTimeString("ko-KR")}] 갱신 완료`);
 }
 
