@@ -3,7 +3,6 @@ require("dotenv").config();
 const {
   Client,
   GatewayIntentBits,
-  EmbedBuilder,
   PermissionFlagsBits,
   ChannelType,
   REST,
@@ -87,49 +86,55 @@ async function fetchExploits() {
 }
 
 // ─────────────────────────────────────────
-//  Embed 빌드
+//  메시지 빌드
 // ─────────────────────────────────────────
-function statusEmoji(e) {
-  if (!e)              return "⚫";
-  if (!e.updateStatus) return "🔴";
-  if (e.detected)      return "🟡";
-  return "🟢";
-}
-
-function exploitLine(e, name) {
-  const emoji = statusEmoji(e);
-  const link  = e?.websitelink ? `[${name}](${e.websitelink})` : `**${name}**`;
-  return `${emoji} ${link}`;
-}
-
-function buildEmbed(allData) {
+function buildMessage(allData) {
   const map = {};
   for (const item of allData) map[item.title.toLowerCase()] = item;
 
-  const timeStr = new Date().toLocaleString("ko-KR", { timeZone: "Asia/Seoul" });
+  const now = new Date();
+  const timeStr = now.toLocaleString("ko-KR", {
+    timeZone: "Asia/Seoul",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: true,
+  });
+  const dateStr = now.toLocaleString("ko-KR", {
+    timeZone: "Asia/Seoul",
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  });
 
-  const embed = new EmbedBuilder()
-    .setTitle("📋 Roblox Exploit 상태판")
-    .setColor(0x5865f2)
-    .setFooter({ text: `WEAO API 기준 · 갱신: ${timeStr}` })
-    .setTimestamp();
+  const winLines = TRACKED.windows.map(n => {
+    const e   = map[n.toLowerCase()];
+    const dot  = (!e || !e.updateStatus) ? "🔴" : "🟢";
+    const link = e?.websitelink ? `[바로가기](${e.websitelink})` : "";
+    return `• ${n}: ${link} ${dot}`;
+  });
 
-  const winLines = TRACKED.windows.map(n => exploitLine(map[n.toLowerCase()], n));
-  const macLines = TRACKED.mac.map(n => exploitLine(map[n.toLowerCase()], n));
+  const macLines = TRACKED.mac.map(n => {
+    const e   = map[n.toLowerCase()];
+    const dot  = (!e || !e.updateStatus) ? "🔴" : "🟢";
+    const link = e?.websitelink ? `[바로가기](${e.websitelink})` : "";
+    return `• ${n}: ${link} ${dot}`;
+  });
 
-  embed.addFields(
-    { name: "🖥️ Windows", value: winLines.join("\n") },
-    { name: "🍎 Mac",     value: macLines.join("\n") },
-    { name: "범례",        value: "🟢 정상　🟡 감지됨　🔴 다운　⚫ 정보없음", inline: false },
-  );
-
-  return embed;
+  return [
+    "**Windows [윈도우]**",
+    winLines.join("\n"),
+    "\n─────────────────────────────────────",
+    "**Mac [맥]**",
+    macLines.join("\n"),
+    "\n온라인 여부 확인하러 가기: weao.xyz",
+    `${dateStr} ${timeStr}`,
+  ].join("\n");
 }
 
 // ─────────────────────────────────────────
 //  텍스트 채널 갱신
 // ─────────────────────────────────────────
-async function updateTextChannel(embed) {
+async function updateTextChannel(content) {
   if (!data.text?.channelId) return;
 
   const channel = await client.channels.fetch(data.text.channelId).catch(() => null);
@@ -138,14 +143,14 @@ async function updateTextChannel(embed) {
   if (data.text.messageId) {
     try {
       const msg = await channel.messages.fetch(data.text.messageId);
-      await msg.edit({ embeds: [embed] });
+      await msg.edit({ content });
       return;
     } catch {
       console.warn("기존 메시지 수정 실패 → 새 메시지 전송");
     }
   }
 
-  const sent = await channel.send({ embeds: [embed] });
+  const sent = await channel.send({ content });
   data.text.messageId = sent.id;
   saveData(data);
   console.log(`새 메시지 전송 | msg: ${sent.id}`);
@@ -162,8 +167,8 @@ async function postOrUpdate() {
     return console.error("WEAO API 오류:", err.message);
   }
 
-  const embed = buildEmbed(allData);
-  await updateTextChannel(embed);
+  const content = buildMessage(allData);
+  await updateTextChannel(content);
   console.log(`[${new Date().toLocaleTimeString("ko-KR")}] 갱신 완료`);
 }
 
