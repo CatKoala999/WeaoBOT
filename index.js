@@ -100,31 +100,31 @@ function buildMessage(allData) {
     minute: "2-digit",
     hour12: true,
   });
-  const dateStr = now.toLocaleString("ko-KR", {
-    timeZone: "Asia/Seoul",
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-  });
 
   const formatLine = (n) => {
     const e    = map[n.toLowerCase()];
     const dot  = (!e || !e.updateStatus) ? "🔴" : "🟢";
-    const link = e?.websitelink ? `[바로가기](<${e.websitelink}>)` : "";
-    const paid = e ? (e.free ? "무료" : `유료 / ${e.cost ?? "가격 미정"}`) : "정보 없음";
-    return `• ${n} / ${paid}: ${link} ${dot}`;
+    const link = e?.websitelink ? `[바로가기](<${e.websitelink}>)` : "바로가기";
+
+    if (e && !e.free) {
+      // 유료
+      return `• ${n} / [유료]: ${link} ${dot}`;
+    } else {
+      // 무료
+      return `• ${n}: ${link} ${dot}`;
+    }
   };
 
   const winLines = TRACKED.windows.map(formatLine);
   const macLines = TRACKED.mac.map(formatLine);
 
   return [
-    "**Windows [윈도우]**",
+    `\`Windows [윈도우]\``,
     winLines.join("\n"),
     "\n─────────────────────────────────────",
-    "**Mac [맥]**",
+    `\`Mac [맥]\``,
     macLines.join("\n"),
-    "\n온라인 여부 확인하러 가기: weao.xyz",
+    "\n온라인 여부 확인하러 가기: [weao.xyz](<https://weao.xyz/>)",
     `오늘 ${timeStr}`,
   ].join("\n");
 }
