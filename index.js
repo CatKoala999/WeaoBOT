@@ -3,12 +3,12 @@ require("dotenv").config();
 const {
   Client,
   GatewayIntentBits,
-  EmbedBuilder,
   PermissionFlagsBits,
   ChannelType,
   REST,
   Routes,
   SlashCommandBuilder,
+  MessageFlags,
 } = require("discord.js");
 
 const fs = require("fs");
@@ -87,9 +87,9 @@ async function fetchExploits() {
 }
 
 // ─────────────────────────────────────────
-//  Embed 빌드
+//  메시지 빌드
 // ─────────────────────────────────────────
-function buildEmbed(allData) {
+function buildMessage(allData) {
   const map = {};
   for (const item of allData) map[item.title.toLowerCase()] = item;
 
@@ -110,30 +110,32 @@ function buildEmbed(allData) {
   const winLines = TRACKED.windows.map(n => {
     const e   = map[n.toLowerCase()];
     const dot  = (!e || !e.updateStatus) ? "🔴" : "🟢";
-    const link = e?.websitelink ? `[바로가기](${e.websitelink})` : "";
+    const link = e?.websitelink ? `[바로가기](<${e.websitelink}>)` : "";
     return `• ${n}: ${link} ${dot}`;
   });
 
   const macLines = TRACKED.mac.map(n => {
     const e   = map[n.toLowerCase()];
     const dot  = (!e || !e.updateStatus) ? "🔴" : "🟢";
-    const link = e?.websitelink ? `[바로가기](${e.websitelink})` : "";
+    const link = e?.websitelink ? `[바로가기](<${e.websitelink}>)` : "";
     return `• ${n}: ${link} ${dot}`;
   });
 
-  return new EmbedBuilder()
-    .setColor(0x5865f2)
-    .addFields(
-      { name: "🖥️ Windows [윈도우]", value: winLines.join("\n") },
-      { name: "🍎 Mac [맥]",         value: macLines.join("\n") },
-    )
-    .setFooter({ text: `온라인 여부 확인하러 가기: weao.xyz  ·  ${dateStr} ${timeStr}` });
+  return [
+    "**Windows [윈도우]**",
+    winLines.join("\n"),
+    "\n─────────────────────────────────────",
+    "**Mac [맥]**",
+    macLines.join("\n"),
+    "\n온라인 여부 확인하러 가기: weao.xyz",
+    `오늘 ${timeStr}`,
+  ].join("\n");
 }
 
 // ─────────────────────────────────────────
 //  텍스트 채널 갱신
 // ─────────────────────────────────────────
-async function updateTextChannel(embed) {
+async function updateTextChannel(content) {
   if (!data.text?.channelId) return;
 
   const channel = await client.channels.fetch(data.text.channelId).catch(() => null);
@@ -142,14 +144,14 @@ async function updateTextChannel(embed) {
   if (data.text.messageId) {
     try {
       const msg = await channel.messages.fetch(data.text.messageId);
-      await msg.edit({ embeds: [embed] });
+      await msg.edit({ content, flags: MessageFlags.SuppressEmbeds });
       return;
     } catch {
       console.warn("기존 메시지 수정 실패 → 새 메시지 전송");
     }
   }
 
-  const sent = await channel.send({ embeds: [embed] });
+  const sent = await channel.send({ content, flags: MessageFlags.SuppressEmbeds });
   data.text.messageId = sent.id;
   saveData(data);
   console.log(`새 메시지 전송 | msg: ${sent.id}`);
@@ -166,8 +168,8 @@ async function postOrUpdate() {
     return console.error("WEAO API 오류:", err.message);
   }
 
-  const embed = buildEmbed(allData);
-  await updateTextChannel(embed);
+  const content = buildMessage(allData);
+  await updateTextChannel(content);
   console.log(`[${new Date().toLocaleTimeString("ko-KR")}] 갱신 완료`);
 }
 
